@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run pytest:*)",
+      "Bash(uv run ruff:*)",
+      "Bash(uv run python -m blockudoku.:*)",
+      "Bash(uv sync:*)",
+      "Bash(make test)",
+      "Bash(make check)",
+      "Bash(make lint)",
+      "Bash(make sync)",
+      "Bash(make baselines)",
+      "Bash(node tests/js/:*)"
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+# Seconds on CPU. Used by tests and to sanity-check the pipeline end to end.
+extends: full.yaml
+
+num_envs: 8
+total_env_steps: 4000
+buffer_steps: 256
+learning_starts: 500
+batch_size: 32
+updates_per_iteration: 1
+lr_warmup_updates: 10
+target_update_period: 100
+compute_dtype: float32
+iterations_per_log: 50
+eval_every_logs: 5
+eval_episodes: 8
+eval_max_moves: 300
+
+net:
+  dim: 32
+  depth: 1
+  heads: 2
+  mlp_ratio: 2
+  num_registers: 2
+  adv_hidden: 32
+  value_hidden: 32
+  num_atoms: 51
+
+wandb:
+  enabled: false

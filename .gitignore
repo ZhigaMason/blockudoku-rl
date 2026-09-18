@@ -1,0 +1,21 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Node (dev-only, for tests)
+node_modules/
+
+# Training runs (checkpoints, logs). Ship a model by exporting it to web/model/.
+runs/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Secrets and local experiment tracking
+.env
+wandb/

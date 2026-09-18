@@ -1,0 +1,69 @@
+# Full Rainbow run for one large GPU (>= 32 GB). Install: uv sync --extra cuda
+# Every field must be set here; other presets `extends:` this file.
+#
+# Cost model: env steps are cheap; the network dominates. Gradient samples per
+# env transition ("replay ratio") = batch_size * updates_per_iteration / num_envs
+# = 1024 * 2 / 512 = 4. Raise updates_per_iteration for sample efficiencti, lower
+# it for wall-clock speed.
+seed: 0
+
+# --- environment / acting
+num_envs: 512               # parallel games; one iteration adds num_envs transitions
+total_env_steps: 100000000
+reward_scale: 1.0           # raw game points: the log-spaced support covers the range
+
+# --- prioritised n-step replay (capacity = buffer_steps * num_envs transitions)
+buffer_steps: 16384         # 8.4M transitions, ~0.9 GB on device
+learning_starts: 500000     # transitions collected before the first gradient update
+n_step: 3
+gamma: 0.99
+priority_alpha: 0.5
+priority_beta0: 0.4         # annealed linearly to 1.0 over total_env_steps
+priority_eps: 1.0e-6
+
+# --- distributional value support
+v_min: 0.0
+v_max: 5000.0               # discounted return in (scaled) points
+support_scale: symlog       # atoms uniform in symlog space = log-spaced returns
+
+# --- optimisation
+batch_size: 1024
+updates_per_iteration: 2
+learning_rate: 2.0e-4
+lr_warmup_updates: 5000     # linear warm-up; transformers are unstable without it
+weight_decay: 0.01          # AdamW, matrices only
+adam_eps: 1.0e-6
+max_grad_norm: 1.0
+target_update_period: 2000  # gradient updates between target-network syncs
+compute_dtype: bfloat16     # forward/backward in bf16, float32 master weights + optimiser
+iteration_loop: auto        # scan-fused on GPU, python loop on CPU
+
+# --- bookkeeping
+iterations_per_log: 200     # ~100k env steps per log line
+eval_every_logs: 10
+eval_episodes: 256
+eval_max_moves: 20000
+
+# --- network: vision transformer (src/blockudoku/network.py)
+net:
+  dim: 192
+  depth: 6
+  heads: 6                  # head_dim 32 (must be divisible by 4 for 2D RoPE)
+  mlp_ratio: 4
+  num_registers: 4          # memory tokens; the value head reads them
+  rope_base: 100.0
+  adv_hidden: 256
+  value_hidden: 512
+  num_atoms: 101
+  noisy_sigma0: 0.5
+
+# --- experiment tracking. Credentials come from .env (see .env.example):
+#     WANDB_API_KEY (required for online mode), WANDB_ENTITY (optional)
+wandb:
+  enabled: true
+  project: blockudoku-rl
+  entity: ""   # "" -> WANDB_ENTITY / your default
+  group: ""
+  tags: [rainbow, vit]
+  mode: online              # offline: log locally, upload later with `wandb sync`
+  log_checkpoints: true     # upload best.eqx + config.yaml as a model artifact on each new best

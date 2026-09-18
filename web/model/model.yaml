@@ -1,0 +1,31 @@
+run: smoke
+checkpoint: best.eqx
+eval_score_mean: 95.25
+env_steps: 2000
+inputs:
+  planes:
+  - 4
+  - 9
+  - 9
+  pieces:
+  - 75
+outputs:
+  q:
+  - 243
+action_index: slot*81 + row*9 + col (docs/RULES.md section 6)
+value_support:
+  v_min: 0.0
+  v_max: 5000.0
+  scale: symlog
+  reward_scale: 1.0
+net:
+  dim: 32
+  depth: 1
+  heads: 2
+  mlp_ratio: 2
+  num_registers: 2
+  rope_base: 100.0
+  adv_hidden: 32
+  value_hidden: 32
+  num_atoms: 51
+  noisy_sigma0: 0.5

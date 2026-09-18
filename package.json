@@ -1,0 +1,9 @@
+{
+  "name": "blockudoku-rl-web",
+  "private": true,
+  "type": "module",
+  "description": "Dev-only: lets tests run web/*.js under Node with the same onnxruntime-web version the page loads from the CDN.",
+  "devDependencies": {
+    "onnxruntime-web": "1.30.0"
+  }
+}
