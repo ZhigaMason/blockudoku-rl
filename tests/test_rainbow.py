@@ -116,3 +116,10 @@ def test_tracker_reads_credentials_from_dotenv(tmp_path, monkeypatch):
 
         assert os.environ["WANDB_API_KEY"] == "dummy-key-for-test"
         assert tracker.run is not None
+
+
+def test_time_limit_stops_early_with_final_eval(tmp_path):
+    cfg = load_config("smoke", ["total_env_steps=100000", "eval_every_logs=1000"])
+    last = train(cfg, tmp_path, log=lambda *_: None, time_limit_hours=1e-9)
+    assert last["env_steps"] == cfg.iterations_per_log * cfg.num_envs  # one window only
+    assert "eval_score_mean" in last and (tmp_path / "best.eqx").exists()

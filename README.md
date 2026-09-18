@@ -42,6 +42,32 @@ uv run python -m blockudoku.evaluate runs/full --episodes 512
 uv run python -m blockudoku.export_onnx runs/full      # best.eqx -> web/model/
 ```
 
+### MetaCentrum (48 h GPU job)
+
+From the repo root on a MetaCentrum frontend (the repo must be on `/storage/...`, with `.env` in it):
+
+```bash
+qsub scripts/metacentrum/train_gpu.pbs                          # configs/full.yaml
+qsub -v CONFIG=myexp,RUN_NAME=vit-depth8 scripts/metacentrum/train_gpu.pbs
+qstat -u $USER                                                  # job state
+tail -f runs/<run name>/train.log                               # live log
+```
+
+The job:
+- **Requests:** 1 GPU with ≥32 GB, 8 CPUs, 64 GB RAM and 48 h walltime.
+- **Setup:** copies the code to local scratch, installs uv if missing (into `~/.local/bin`),
+  and runs `uv sync --locked --extra cuda --extra wandb`. The uv cache in `~/.cache/uv`
+  persists, so the CUDA wheels download only once.
+- **Fails fast** if JAX can't see the GPU.
+- **Trains** with `--time-limit-hours` set to the walltime minus 45 minutes. It stops
+  cleanly with a final evaluation, checkpoint and W&B upload before PBS kills the job.
+- **Writes** `runs/<name>/` straight to persistent storage: `best.eqx`, `model.eqx`,
+  `metrics.jsonl`, `train.log` and W&B files.
+
+For an experiment, add `configs/<name>.yaml` with `extends: full.yaml` and submit with
+`CONFIG=<name>`. The header of the script lists all variables. If training should use the
+whole 48 h, make sure `total_env_steps` isn't reached earlier.
+
 ## Model
 
 Tokens (`T = 81 + 3 + R`) → pre-LN transformer → noisy dueling C51 heads.

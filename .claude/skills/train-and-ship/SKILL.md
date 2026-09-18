@@ -29,8 +29,12 @@ Knobs that matter most:
 ## 2. Train (in the background)
 
 ```bash
-uv run python -m blockudoku.train --config <name> --out runs/<name>
+uv run python -m blockudoku.train --config <name> --out runs/<name> [--time-limit-hours 12]
 ```
+
+On MetaCentrum, submit `qsub -v CONFIG=<name> scripts/metacentrum/train_gpu.pbs` instead.
+It's a 48 h GPU job that stops cleanly before the walltime. You can't run qsub from this
+machine, so give the user the command.
 
 Each run dir gets `config.yaml` (fully resolved), `metrics.jsonl`, `model.eqx` (latest),
 and `best.eqx` (best greedy eval). With wandb enabled, the first lines print the run URL.

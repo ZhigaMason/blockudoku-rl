@@ -1,0 +1,94 @@
+#!/bin/bash
+#PBS -N blockudoku-rl
+#PBS -q gpu
+#PBS -l select=1:ncpus=8:ngpus=1:gpu_mem=32gb:mem=64gb:scratch_local=40gb
+#PBS -l walltime=60:00:00
+#PBS -j oe
+#PBS -m ae
+#
+# Train Blockudoku Rainbow on one MetaCentrum GPU for (up to) 48 hours.
+#
+# Submit from the repo root on a frontend (the repo must live on /storage/...):
+#     qsub scripts/metacentrum/train_gpu.pbs
+#     qsub -v CONFIG=myexp,RUN_NAME=vit-depth8 scripts/metacentrum/train_gpu.pbs
+#
+# Hyperparameters belong in YAML: for an experiment create configs/<name>.yaml with
+# `extends: full.yaml` and submit with CONFIG=<name>. Optional variables (qsub -v):
+#     CONFIG            preset name or YAML path            (default: full)
+#     RUN_NAME          run dir + wandb run name            (default: <config>-<date>-<job id>)
+#     RUNS_DIR          where run dirs are written          (default: $REPO/runs, persistent storage)
+#     TIME_LIMIT_HOURS  training budget                     (default: walltime minus 45 min)
+#     EXTRA             extra train args, e.g. "--set wandb.mode=offline" (no commas: qsub splits on them)
+#     REPO              repository to run                   (default: where qsub was called)
+#
+# Layout: code + .venv are copied to the node's fast $SCRATCHDIR; checkpoints,
+# metrics.jsonl, train.log and wandb files go straight to $RUNS_DIR on persistent
+# storage, so nothing is lost if the job is killed. W&B credentials come from
+# $REPO/.env (WANDB_API_KEY), which is copied along with the code.
+set -euo pipefail
+
+REPO=${REPO:-${PBS_O_WORKDIR:-$PWD}}
+CONFIG=${CONFIG:-full}
+RUNS_DIR=${RUNS_DIR:-$REPO/runs}
+RUN_NAME=${RUN_NAME:-$(basename "${CONFIG%.yaml}")-$(date +%Y%m%d-%H%M)-${PBS_JOBID%%.*}}
+EXTRA=${EXTRA:-}
+RUN_DIR=$RUNS_DIR/$RUN_NAME
+
+log() { echo "[$(date '+%F %T')] $*"; }
+
+# ---------------------------------------------------------------- time budget
+if [[ -z ${TIME_LIMIT_HOURS:-} ]]; then
+    walltime=$(qstat -f "$PBS_JOBID" 2>/dev/null | sed -n 's/.*Resource_List.walltime = //p' || true)
+    if [[ $walltime =~ ^([0-9]+):([0-9]+):([0-9]+)$ ]]; then
+        secs=$((10#${BASH_REMATCH[1]} * 3600 + 10#${BASH_REMATCH[2]} * 60 + 10#${BASH_REMATCH[3]}))
+        # 45 min margin for the final eval, checkpoint and wandb upload
+        TIME_LIMIT_HOURS=$(awk -v s="$secs" 'BEGIN { printf "%.2f", (s - 2700) / 3600 }')
+    else
+        TIME_LIMIT_HOURS=47.25
+    fi
+fi
+
+log "job ${PBS_JOBID:-?} on $(hostname); repo=$REPO config=$CONFIG run=$RUN_DIR budget=${TIME_LIMIT_HOURS}h"
+nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv || true
+
+# ---------------------------------------------------------------- scratch
+if [[ -z ${SCRATCHDIR:-} ]]; then
+    echo "SCRATCHDIR is not set; request scratch_local in the select statement" >&2
+    exit 1
+fi
+trap 'command -v clean_scratch >/dev/null && clean_scratch' EXIT
+WORK=$SCRATCHDIR/blockudoku-rl
+mkdir -p "$WORK" "$RUN_DIR"
+rsync -a --exclude .venv --exclude runs --exclude node_modules --exclude .git --exclude wandb \
+    "$REPO/" "$WORK/"
+cd "$WORK"
+
+# ---------------------------------------------------------------- uv + deps
+export PATH=$HOME/.local/bin:$PATH
+if ! command -v uv >/dev/null; then
+    log "installing uv into ~/.local/bin"
+    curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="$HOME/.local/bin" INSTALLER_NO_MODIFY_PATH=1 sh
+fi
+export UV_CACHE_DIR=${UV_CACHE_DIR:-$HOME/.cache/uv}  # persists between jobs: CUDA wheels download once
+export UV_LINK_MODE=copy                              # cache (home) and venv (scratch) are different filesystems
+log "uv $(uv --version | cut -d' ' -f2): syncing (cuda + wandb extras)"
+uv sync --locked --no-dev --extra cuda --extra wandb
+
+uv run --no-sync python - <<'EOF'
+import jax
+print("jax", jax.__version__, "devices:", jax.devices(), flush=True)
+assert jax.default_backend() == "gpu", "JAX does not see a GPU (driver / CUDA wheel mismatch?)"
+EOF
+
+if [[ ! -f .env ]] || ! grep -q '^WANDB_API_KEY=.' .env; then
+    log "warning: no WANDB_API_KEY in $REPO/.env; wandb falls back to ~/.netrc (or add EXTRA='--set wandb.mode=offline')"
+fi
+
+# ---------------------------------------------------------------- train
+log "training -> $RUN_DIR"
+# shellcheck disable=SC2086  # EXTRA is intentionally word-split into arguments
+uv run --no-sync python -m blockudoku.train \
+    --config "$CONFIG" --out "$RUN_DIR" --time-limit-hours "$TIME_LIMIT_HOURS" $EXTRA \
+    2>&1 | tee -a "$RUN_DIR/train.log"
+
+log "done: $RUN_DIR (best.eqx, model.eqx, metrics.jsonl, train.log)"

@@ -44,6 +44,7 @@ runs/                      training outputs (gitignored)
 make install                 # uv sync + npm ci (npm is dev-only: tests run web/*.js in Node)
 uv sync --extra cuda         # on the GPU machine (JAX with CUDA 12)
 cp .env.example .env         # WANDB_API_KEY for experiment tracking (never commit .env)
+qsub scripts/metacentrum/train_gpu.pbs   # 48 h GPU job on MetaCentrum (PBS); vars: CONFIG, RUN_NAME, ...
 make test                    # everything; ~1.5 min on CPU
 make check                   # lint + tests + generated-asset freshness (what CI runs)
 make train CONFIG=full RUN=runs/full      # GPU; CONFIG=small for a CPU run

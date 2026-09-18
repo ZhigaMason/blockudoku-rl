@@ -28,16 +28,22 @@ from blockudoku.rainbow import greedy_policy, make_rainbow
 from blockudoku.tracking import Tracker
 
 
-def parse_args(argv=None) -> tuple[Config, Path]:
+def parse_args(argv=None) -> tuple[Config, Path, float | None]:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", required=True, help="preset name in configs/ or path to a YAML file")
     ap.add_argument("--out", required=True, help="run directory")
     ap.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
+    ap.add_argument("--time-limit-hours", type=float, default=None,
+                    help="stop cleanly (final eval + checkpoint) before this wall-clock budget runs out")
     args = ap.parse_args(argv)
-    return load_config(args.config, args.overrides), Path(args.out)
+    return load_config(args.config, args.overrides), Path(args.out), args.time_limit_hours
 
 
-def train(cfg: Config, out: Path, log=print) -> dict:
+def train(cfg: Config, out: Path, log=print, time_limit_hours: float | None = None) -> dict:
+    """Train until cfg.total_env_steps or, if given, until the next log window would
+    overrun `time_limit_hours`; either way the last window is evaluated and saved."""
+    start = time.perf_counter()
+    deadline = None if time_limit_hours is None else start + time_limit_hours * 3600
     out.mkdir(parents=True, exist_ok=True)
     cfg.save(out / "config.yaml")
     rb = make_rainbow(cfg)
@@ -70,7 +76,10 @@ def train(cfg: Config, out: Path, log=print) -> dict:
                 "train_moves_mean": int(s.moves_sum) / n,
                 "sps": steps_per_log / dt,
             }
-            if i % cfg.eval_every_logs == 0 or i == num_logs:
+            # stop if another window of the same length would not fit in the budget
+            out_of_time = deadline is not None and time.perf_counter() + dt > deadline
+            final = i == num_logs or out_of_time
+            if i % cfg.eval_every_logs == 0 or final:
                 net = rb.model(ts.params)
                 pol = greedy_policy(net, rb.support)
                 res = evaluate.play(lambda b, h, k, pol=pol: pol(b, h), eval_key,
@@ -88,12 +97,16 @@ def train(cfg: Config, out: Path, log=print) -> dict:
             log(" ".join(f"{k}={v:.3g}" if isinstance(v, float) else f"{k}={v}"
                          for k, v in row.items()))
             last = row
+            if out_of_time and i < num_logs:
+                log(f"time limit: stopping after {(time.perf_counter() - start) / 3600:.2f} h "
+                    f"at env_steps={row['env_steps']}")
+                break
     return last
 
 
 def main() -> None:
-    cfg, out = parse_args()
-    train(cfg, out)
+    cfg, out, time_limit_hours = parse_args()
+    train(cfg, out, time_limit_hours=time_limit_hours)
 
 
 if __name__ == "__main__":
