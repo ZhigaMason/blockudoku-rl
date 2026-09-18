@@ -49,6 +49,7 @@ From the repo root on a MetaCentrum frontend (the repo must be on `/storage/...`
 ```bash
 qsub scripts/metacentrum/train_gpu.pbs                          # configs/full.yaml
 qsub -v CONFIG=myexp,RUN_NAME=vit-depth8 scripts/metacentrum/train_gpu.pbs
+qsub scripts/metacentrum/train_blackwell.pbs                     # configs/full-1b.yaml (1B steps) on a Blackwell GPU, gpu_long
 qstat -u $USER                                                  # job state
 tail -f runs/<run name>/train.log                               # live log
 ```

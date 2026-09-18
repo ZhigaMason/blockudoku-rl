@@ -1,0 +1,22 @@
+#!/bin/bash
+#PBS -N blockudoku-rl-1b
+#PBS -q gpu_long
+#PBS -l select=1:ncpus=8:ngpus=1:gpu_cap=compute_100:gpu_mem=32gb:mem=64gb:scratch_local=40gb
+#PBS -l walltime=336:00:00
+#PBS -j oe
+#PBS -m ae
+#
+# The 1B-step run (configs/full-1b.yaml) on one Blackwell GPU (compute capability >= 10.0:
+# B200, RTX PRO 6000 Blackwell, ...), for up to 14 days in the gpu_long queue.
+#
+#     qsub scripts/metacentrum/train_blackwell.pbs
+#     qsub -v RUN_NAME=vit-1b scripts/metacentrum/train_blackwell.pbs
+#     qsub -l walltime=168:00:00 scripts/metacentrum/train_blackwell.pbs   # shorter job, starts sooner
+#
+# Everything else (scratch, uv, time budget = walltime - 45 min, variables CONFIG,
+# RUN_NAME, RUNS_DIR, TIME_LIMIT_HOURS, EXTRA, REPO) is train_gpu.pbs; see its header.
+set -euo pipefail
+
+REPO=${REPO:-${PBS_O_WORKDIR:-$PWD}}
+export REPO CONFIG=${CONFIG:-full-1b}
+exec bash "$REPO/scripts/metacentrum/train_gpu.pbs"
