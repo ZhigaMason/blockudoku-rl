@@ -24,7 +24,7 @@ import numpy as np
 from blockudoku import checkpoint, evaluate
 from blockudoku.config import Config, load_config
 from blockudoku.network import num_params
-from blockudoku.rainbow import greedy_policy, make_rainbow
+from blockudoku.rainbow import greedy_policy, lr_schedule, make_rainbow
 from blockudoku.tracking import Tracker
 
 
@@ -47,6 +47,7 @@ def train(cfg: Config, out: Path, log=print, time_limit_hours: float | None = No
     out.mkdir(parents=True, exist_ok=True)
     cfg.save(out / "config.yaml")
     rb = make_rainbow(cfg)
+    schedule = lr_schedule(cfg)
     key, eval_key = jax.random.split(jax.random.key(cfg.seed))
     ts = rb.init(key)
     log(f"devices={jax.devices()} params={num_params(rb.model(ts.params)):,} "
@@ -66,10 +67,14 @@ def train(cfg: Config, out: Path, log=print, time_limit_hours: float | None = No
             dt = time.perf_counter() - t0
             s = jax.device_get(ts.stats)
             n = max(int(s.count), 1)
+            window_updates = max(int(ts.num_updates) - updates_before, 1)
             row = {
                 "env_steps": int(ts.iteration) * cfg.num_envs,
                 "updates": int(ts.num_updates),
-                "loss": float(ts.loss_sum) / max(int(ts.num_updates) - updates_before, 1),
+                "loss": float(ts.loss_sum) / window_updates,
+                "grad_norm_mean": float(ts.grad_norm_sum) / window_updates,
+                "grad_norm_max": float(ts.grad_norm_max),
+                "lr": float(schedule(ts.num_updates)),
                 "episodes": int(s.count),
                 "train_score_mean": int(s.score_sum) / n,
                 "train_score_max": int(s.score_max),

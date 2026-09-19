@@ -47,6 +47,8 @@ class TrainState(NamedTuple):
     iteration: jax.Array
     num_updates: jax.Array
     loss_sum: jax.Array  # sum of losses over the current log window
+    grad_norm_sum: jax.Array  # sum / max of pre-clipping global grad norms over the window
+    grad_norm_max: jax.Array
     stats: EpisodeStats
 
 
@@ -86,8 +88,25 @@ class Rainbow(NamedTuple):
     uses_scan: bool
 
 
+def total_updates(cfg: Config) -> int:
+    """Gradient updates in a full run (learning starts after `learning_starts` transitions)."""
+    iterations = cfg.total_env_steps // cfg.num_envs - cfg.learning_starts // cfg.num_envs
+    return max(iterations, 1) * cfg.updates_per_iteration
+
+
+def lr_schedule(cfg: Config) -> optax.Schedule:
+    """Linear warm-up to `learning_rate`, then linear decay to `lr_final_fraction` of it
+    at the last update of the run (held there if training runs longer)."""
+    warmup = max(cfg.lr_warmup_updates, 1)
+    return optax.join_schedules([
+        optax.linear_schedule(0.0, cfg.learning_rate, warmup),
+        optax.linear_schedule(cfg.learning_rate, cfg.learning_rate * cfg.lr_final_fraction,
+                              max(total_updates(cfg) - warmup, 1)),
+    ], [warmup])
+
+
 def make_optimizer(cfg: Config) -> optax.GradientTransformation:
-    schedule = optax.linear_schedule(0.0, cfg.learning_rate, max(cfg.lr_warmup_updates, 1))
+    schedule = lr_schedule(cfg)
 
     def decay_mask(params):  # weight-decay matrices only, not biases / LayerNorm gains
         return jax.tree.map(lambda p: p.ndim >= 2, params)
@@ -170,6 +189,7 @@ def make_rainbow(cfg: Config) -> Rainbow:
                               cfg.priority_alpha, beta)
         (loss, ce), grads = jax.value_and_grad(loss_fn, has_aux=True)(
             ts.params, ts.target_params, batch, k_loss)
+        grad_norm = optax.tree.norm(grads)  # before clipping; NaN here means NaN grads
         updates, opt_state = optimizer.update(grads, ts.opt_state, ts.params)
         params = optax.apply_updates(ts.params, updates)
         buffer = replay.update_priorities(ts.buffer, batch.t, batch.e, ce + cfg.priority_eps)
@@ -178,7 +198,9 @@ def make_rainbow(cfg: Config) -> Rainbow:
         sync = num_updates % cfg.target_update_period == 0
         target = jax.tree.map(lambda p, t: jnp.where(sync, p, t), params, ts.target_params)
         return ts._replace(params=params, target_params=target, opt_state=opt_state,
-                           buffer=buffer, num_updates=num_updates, loss_sum=ts.loss_sum + loss)
+                           buffer=buffer, num_updates=num_updates, loss_sum=ts.loss_sum + loss,
+                           grad_norm_sum=ts.grad_norm_sum + grad_norm,
+                           grad_norm_max=jnp.maximum(ts.grad_norm_max, grad_norm))
 
     def learning_ready(iteration: int) -> bool:
         """Host-side mirror of replay.num_transitions after this iteration's env step."""
@@ -216,8 +238,9 @@ def make_rainbow(cfg: Config) -> Rainbow:
     runners = {False: make_runner(False), True: make_runner(True)}
 
     def run(ts: TrainState) -> TrainState:
-        """Run cfg.iterations_per_log iterations; resets the window's stats and loss sum."""
-        ts = ts._replace(stats=zero_stats(), loss_sum=jnp.zeros(()))
+        """Run cfg.iterations_per_log iterations; resets the window's stats, loss and grad norms."""
+        ts = ts._replace(stats=zero_stats(), loss_sum=jnp.zeros(()),
+                         grad_norm_sum=jnp.zeros(()), grad_norm_max=jnp.zeros(()))
         start = int(ts.iteration)
         end = start + cfg.iterations_per_log
         first_learn = next((i for i in range(start, end) if learning_ready(i)), end)
@@ -239,6 +262,8 @@ def make_rainbow(cfg: Config) -> Rainbow:
             iteration=jnp.zeros((), jnp.int32),
             num_updates=jnp.zeros((), jnp.int32),
             loss_sum=jnp.zeros(()),
+            grad_norm_sum=jnp.zeros(()),
+            grad_norm_max=jnp.zeros(()),
             stats=zero_stats(),
         )
 

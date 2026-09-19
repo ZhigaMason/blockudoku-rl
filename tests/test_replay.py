@@ -68,3 +68,14 @@ def test_priority_update_tracks_max():
     assert float(buf.priority[1, 1]) == 7.0 and float(buf.max_priority) == 7.0
     buf = replay.add(buf, buf.board[0], buf.hand[0].astype(jnp.int32), buf.action[0], buf.reward[0], buf.done[0])
     assert (np.asarray(buf.priority[5]) == 7.0).all()
+
+
+def test_importance_weights_stay_finite_for_zero_probability():
+    # a zero-mass slot picked through float32 rounding used to give inf / inf = NaN
+    prob = jnp.array([0.0, 1e-4, 4e-4, 1e-2])
+    w = np.asarray(replay.importance_weights(prob, 1000, jnp.float32(0.5)))
+    assert np.isfinite(w).all() and w[0] == 0.0
+    expected = (1000 * np.asarray(prob[1:])) ** -0.5
+    np.testing.assert_allclose(w[1:], expected / expected.max(), rtol=1e-6)
+    # a batch of only zero-mass samples trains on nothing instead of NaN
+    assert (np.asarray(replay.importance_weights(jnp.zeros(3), 1000, jnp.float32(1.0))) == 0).all()

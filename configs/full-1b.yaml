@@ -6,11 +6,16 @@ extends: full.yaml
 
 total_env_steps: 1000000000  # PER beta also anneals to 1.0 over this horizon
 
-buffer_steps: 65536         # 33.5M transitions, ~3.6 GB on device
+# Throughput is set by the replay ratio (updates are ~97% of the time): at 512 envs
+# (ratio 4) a Blackwell GPU ran 4.7k env steps/s = 60 h, over the 48 h walltime.
+# 672 envs -> ratio 1024 * 2 / 672 = 3.05, predicted ~6.05k steps/s = ~46 h of the
+# 47.25 h budget (walltime - 45 min), i.e. as many updates as the job can fit.
+num_envs: 672
+buffer_steps: 49920         # 33.5M transitions (as before), ~3.6 GB on device
 learning_starts: 2000000
 
-iterations_per_log: 1000    # ~512k env steps per log line (~2k lines per run)
-eval_every_logs: 10         # eval every ~5M env steps
+iterations_per_log: 1000    # ~672k env steps per log line (~1.5k lines per run)
+eval_every_logs: 10         # eval every ~6.7M env steps
 
 wandb:
   tags: [rainbow, vit, 1b]

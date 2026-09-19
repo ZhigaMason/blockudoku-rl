@@ -6,7 +6,7 @@ import pytest
 from blockudoku import checkpoint
 from blockudoku.config import load_config
 from blockudoku.network import value_support
-from blockudoku.rainbow import categorical_projection, make_rainbow
+from blockudoku.rainbow import categorical_projection, lr_schedule, make_rainbow, total_updates
 from blockudoku.train import train
 
 
@@ -65,6 +65,8 @@ def test_run_learns_and_updates_everything(loop):
     assert int(ts.iteration) == 40
     assert rb.uses_scan == (loop == "scan")
     assert int(ts.num_updates) > 0 and np.isfinite(float(ts.loss_sum))
+    gmax, gmean = float(ts.grad_norm_max), float(ts.grad_norm_sum) / int(ts.num_updates)
+    assert 0 < gmean <= gmax and np.isfinite(gmax)
     changed = jax.tree.map(lambda a, b: not np.allclose(a, np.asarray(b)), p0, ts.params)
     assert all(jax.tree.leaves(changed)), "some parameters received no gradient"
     assert int(ts.buffer.size) == 40
@@ -79,10 +81,22 @@ def test_bfloat16_training_step_is_finite():
     assert all(x.dtype == jnp.float32 for x in jax.tree.leaves(ts.params)), "master weights stay f32"
 
 
+def test_lr_warms_up_then_decays_linearly_to_final_fraction():
+    cfg = load_config("smoke", ["learning_rate=1.0e-3", "lr_warmup_updates=10", "lr_final_fraction=0.1"])
+    sched, n = lr_schedule(cfg), total_updates(cfg)
+    assert abs(n - (cfg.total_env_steps - cfg.learning_starts) / cfg.num_envs * cfg.updates_per_iteration) <= 2
+    lr = np.array([float(sched(i)) for i in range(n + 20)])
+    assert lr[0] == 0.0 and np.isclose(lr[10], 1e-3)
+    assert (np.diff(lr[:11]) > 0).all() and (np.diff(lr[10:n + 1]) < 0).all()
+    np.testing.assert_allclose(lr[(10 + n) // 2], 0.55e-3, rtol=1e-2)  # linear midpoint
+    np.testing.assert_allclose(lr[n:], 1e-4, rtol=1e-6)  # held at the final value
+
+
 def test_train_writes_checkpoint(tmp_path):
     cfg = load_config("smoke", ["total_env_steps=800", "eval_every_logs=1", "eval_episodes=4"])
     last = train(cfg, tmp_path, log=lambda *_: None)
     assert "eval_score_mean" in last
+    assert {"grad_norm_mean", "grad_norm_max", "lr"} <= last.keys()
     _, cfg2 = checkpoint.load(tmp_path)
     assert cfg2 == cfg
     assert (tmp_path / "best.eqx").exists() and (tmp_path / "metrics.jsonl").exists()

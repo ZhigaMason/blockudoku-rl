@@ -41,11 +41,14 @@ and `best.eqx` (best greedy eval). With wandb enabled, the first lines print the
 Read progress from `metrics.jsonl`, which holds the same data as the wandb charts:
 
 - `loss` is the mean C51 cross-entropy of the window (≤ ln(num_atoms)).
+- `grad_norm_mean` / `grad_norm_max` are pre-clipping global gradient norms; `lr` is the
+  scheduled rate (warm-up, then linear decay to `lr_final_fraction`).
 - `train_score_mean` uses the noisy policy; `eval_score_mean` is greedy and noise-free.
 - `sps` drops once updates start (`updates` > 0). The first window includes compile time.
 
 Warning signs:
-- A NaN loss: lower `learning_rate`, lengthen the warm-up, or try `compute_dtype: float32`.
+- A NaN loss: check whether `grad_norm_max` spiked first (instability: lower `learning_rate`,
+  lengthen the warm-up, try `compute_dtype: float32`) or jumped straight to NaN (a numerical bug).
 - Eval stuck at the random baseline (≈ 79) long after `learning_starts`.
 - `unfinished` games in eval: the agent is hitting `eval_max_moves`, so raise it.
 

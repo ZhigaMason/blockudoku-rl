@@ -31,6 +31,7 @@ batch_size: 1024
 updates_per_iteration: 2
 learning_rate: 2.0e-4
 lr_warmup_updates: 5000     # linear warm-up; transformers are unstable without it
+lr_final_fraction: 0.1      # then linear decay to 0.1 * learning_rate over the whole run
 weight_decay: 0.01          # AdamW, matrices only
 adam_eps: 1.0e-6
 max_grad_norm: 1.0

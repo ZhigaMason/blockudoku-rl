@@ -108,10 +108,7 @@ def sample(buf: Replay, key, batch_size: int, n_step: int, gamma: float, alpha: 
     v = jax.random.uniform(k_col, (batch_size,)) * col_cdf[:, -1] * (1.0 - 1e-6)
     e = jnp.minimum(jax.vmap(lambda c, x: jnp.searchsorted(c, x, side="right"))(col_cdf, v), E - 1)
 
-    prob = p[t, e] / total
-    n_valid = num_transitions(buf, n_step)
-    weight = (n_valid * prob) ** (-beta)
-    weight = weight / weight.max()
+    weight = importance_weights(p[t, e] / total, num_transitions(buf, n_step), beta)
 
     steps = (t[:, None] + jnp.arange(n_step)) % T  # (B, n)
     rewards = buf.reward[steps, e[:, None]]
@@ -128,6 +125,21 @@ def sample(buf: Replay, key, batch_size: int, n_step: int, gamma: float, alpha: 
         next_board=buf.board[tn, e], next_hand=buf.hand[tn, e].astype(jnp.int32),
         weight=weight, t=t, e=e,
     )
+
+
+def importance_weights(prob, n_valid, beta) -> jax.Array:
+    """Max-normalised IS weights (n_valid * prob)**-beta, always finite.
+
+    float32 rounding in the CDF search can (very rarely) pick a zero-mass slot,
+    e.g. one of the newest rows whose n-step successors are not written yet;
+    (0)**-beta = inf would turn the whole batch's loss into NaN. The probability
+    is clamped away from zero, and zero-mass samples get weight 0: they are
+    dropped from the loss rather than trained on with a garbage target.
+    """
+    tiny = jnp.finfo(jnp.float32).tiny
+    weight = (n_valid * jnp.maximum(prob, tiny)) ** (-beta)
+    weight = jnp.where(prob > 0, weight, 0.0)
+    return weight / jnp.maximum(weight.max(), tiny)
 
 
 def update_priorities(buf: Replay, t, e, priorities) -> Replay:

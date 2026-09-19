@@ -71,6 +71,7 @@ class Config:
     updates_per_iteration: int
     learning_rate: float
     lr_warmup_updates: int
+    lr_final_fraction: float  # after warm-up, lr decays linearly to this fraction by the last update
     weight_decay: float
     adam_eps: float
     max_grad_norm: float
