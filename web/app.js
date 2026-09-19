@@ -271,10 +271,17 @@ async function aiMove() {
   } finally { ui.busy = false; }
 }
 
+/** Each autoplay move is first shown as a hint, then played after the speed delay. */
 async function autoplayLoop() {
   while (ui.autoplay && !game.done) {
-    await aiMove();
+    if (!ui.hint && !ui.busy) {
+      ui.busy = true;
+      try { ui.hint = await refreshQ(); } finally { ui.busy = false; }
+      render();
+    }
     await new Promise((r) => setTimeout(r, 1000 - Number($('speed').value)));
+    // play() and newGame() clear ui.hint, so a surviving hint is for the current position.
+    if (ui.autoplay && ui.hint && ui.hint.action >= 0) play(ui.hint.action);
   }
   ui.autoplay = false;
   render();
