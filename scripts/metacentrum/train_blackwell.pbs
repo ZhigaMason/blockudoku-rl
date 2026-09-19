@@ -1,8 +1,8 @@
 #!/bin/bash
 #PBS -N blockudoku-rl-1b
-#PBS -q gpu_long
+#PBS -q gpu
 #PBS -l select=1:ncpus=8:ngpus=1:gpu_cap=compute_100:gpu_mem=32gb:mem=64gb:scratch_local=40gb
-#PBS -l walltime=336:00:00
+#PBS -l walltime=48:00:00
 #PBS -j oe
 #PBS -m ae
 #

@@ -2,7 +2,7 @@
 #PBS -N blockudoku-rl
 #PBS -q gpu
 #PBS -l select=1:ncpus=8:ngpus=1:gpu_mem=32gb:mem=64gb:scratch_local=40gb
-#PBS -l walltime=60:00:00
+#PBS -l walltime=48:00:00
 #PBS -j oe
 #PBS -m ae
 #
