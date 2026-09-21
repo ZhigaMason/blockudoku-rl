@@ -1,5 +1,7 @@
-run: full-1b
+run: full-1b-20260919-1904-23808954
 checkpoint: best.eqx
+eval_score_mean: 24183.37890625
+env_steps: 954240000
 inputs:
   planes:
   - 4
