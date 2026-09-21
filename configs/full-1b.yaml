@@ -1,7 +1,8 @@
 # 1B env steps: full.yaml scaled up in length. Submit with
 # scripts/metacentrum/train_blackwell.pbs (or CONFIG=full-1b on any >= 32 GB GPU).
-# Training cannot resume, so the run must fit one job; `--time-limit-hours`
-# stops it cleanly (final eval + checkpoint) if the GPU is too slow for 1B steps.
+# Training cannot resume exactly (only the network is saved), so the run should fit one
+# job; `--time-limit-hours` stops it cleanly (final eval + checkpoint) if the GPU is too
+# slow for 1B steps. To train on, warm-start a new run: configs/full-1b-cont.yaml.
 extends: full.yaml
 
 total_env_steps: 1000000000  # PER beta also anneals to 1.0 over this horizon

@@ -46,6 +46,7 @@ uv sync --extra cuda         # on the GPU machine (JAX with CUDA 12)
 cp .env.example .env         # WANDB_API_KEY for experiment tracking (never commit .env)
 qsub scripts/metacentrum/train_gpu.pbs   # 48 h GPU job on MetaCentrum (PBS); vars: CONFIG, RUN_NAME, ...
 qsub scripts/metacentrum/train_blackwell.pbs  # 1B-step run (full-1b) on a Blackwell GPU, up to 14 days
+qsub -v INIT_FROM=runs/<run> scripts/metacentrum/continue_blackwell.pbs  # warm-start full-1b-cont from a checkpoint
 make test                    # everything; ~1.5 min on CPU
 make check                   # lint + tests + generated-asset freshness (what CI runs)
 make train CONFIG=full RUN=runs/full      # GPU; CONFIG=small for a CPU run
@@ -53,6 +54,7 @@ make eval RUN=runs/small     # greedy, noise-free; compare with `make baselines`
 make export RUN=runs/small   # -> web/model/
 make serve                   # http://127.0.0.1:8000/
 uv run python -m blockudoku.train --config full --out runs/x --set net.dim=256 --set learning_rate=5e-5
+uv run python -m blockudoku.train --config full-1b-cont --out runs/y --init-from runs/x   # new run, network from runs/x
 ```
 
 Baselines (256 games): random ≈ 79 points, greedy 1-ply ≈ 168.

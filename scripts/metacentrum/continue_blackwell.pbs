@@ -1,0 +1,27 @@
+#!/bin/bash
+#PBS -N blockudoku-rl-1b-cont
+#PBS -q gpu
+#PBS -l select=1:ncpus=8:ngpus=1:gpu_cap=compute_100:gpu_mem=32gb:mem=64gb:scratch_local=40gb
+#PBS -l walltime=48:00:00
+#PBS -j oe
+#PBS -m ae
+#
+# Continue a full-1b run (configs/full-1b-cont.yaml) from its checkpoint on one Blackwell GPU.
+# The network is warm-started; optimiser and replay start fresh (see `train --init-from`).
+#
+#     qsub scripts/metacentrum/continue_blackwell.pbs
+#     qsub -v INIT_FROM=runs/full-1b-20260919-1904-23808954/best.eqx scripts/metacentrum/continue_blackwell.pbs
+#
+# INIT_FROM is a run dir (-> its model.eqx) or an .eqx file, relative to $REPO or absolute.
+# Everything else (CONFIG, RUN_NAME, RUNS_DIR, TIME_LIMIT_HOURS, EXTRA, REPO) is train_gpu.pbs.
+set -euo pipefail
+
+REPO=${REPO:-${PBS_O_WORKDIR:-$PWD}}
+INIT_FROM=${INIT_FROM:-runs/full-1b-20260919-1904-23808954}
+[[ $INIT_FROM = /* ]] || INIT_FROM=$REPO/$INIT_FROM
+if [[ ! -e $INIT_FROM ]]; then
+    echo "INIT_FROM=$INIT_FROM does not exist" >&2
+    exit 1
+fi
+export REPO INIT_FROM CONFIG=${CONFIG:-full-1b-cont}
+exec bash "$REPO/scripts/metacentrum/train_gpu.pbs"

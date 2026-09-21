@@ -9,6 +9,11 @@ field (dotted for nested keys). Writes to --out: config.yaml (the fully
 resolved config), model.eqx (latest), best.eqx (best eval score) and
 metrics.jsonl (one JSON object per log line). With `wandb.enabled` the same
 metrics go to Weights & Biases (credentials from .env, see .env.example).
+
+`--init-from` warm-starts a new run from a checkpoint (a run dir, meaning its
+model.eqx, or an .eqx file inside one). Only the network is saved, so optimiser
+state, replay buffer and counters start fresh: the buffer refills for
+`learning_starts` transitions with the loaded policy, and the LR warms up again.
 """
 
 from __future__ import annotations
@@ -18,30 +23,54 @@ import json
 import time
 from pathlib import Path
 
+import equinox as eqx
 import jax
+import jax.numpy as jnp
 import numpy as np
 
 from blockudoku import checkpoint, evaluate
 from blockudoku.config import Config, load_config
 from blockudoku.network import num_params
-from blockudoku.rainbow import greedy_policy, lr_schedule, make_rainbow
+from blockudoku.rainbow import Rainbow, TrainState, greedy_policy, lr_schedule, make_rainbow
 from blockudoku.tracking import Tracker
 
 
-def parse_args(argv=None) -> tuple[Config, Path, float | None]:
+def parse_args(argv=None) -> tuple[Config, Path, float | None, Path | None]:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", required=True, help="preset name in configs/ or path to a YAML file")
     ap.add_argument("--out", required=True, help="run directory")
     ap.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
     ap.add_argument("--time-limit-hours", type=float, default=None,
                     help="stop cleanly (final eval + checkpoint) before this wall-clock budget runs out")
+    ap.add_argument("--init-from", type=Path, default=None, metavar="RUN_DIR|FILE.eqx",
+                    help="warm-start the network from a checkpoint (default file: model.eqx)")
     args = ap.parse_args(argv)
-    return load_config(args.config, args.overrides), Path(args.out), args.time_limit_hours
+    return (load_config(args.config, args.overrides), Path(args.out), args.time_limit_hours,
+            args.init_from)
 
 
-def train(cfg: Config, out: Path, log=print, time_limit_hours: float | None = None) -> dict:
+def warm_start(rb: Rainbow, ts: TrainState, path: Path, log=print) -> TrainState:
+    """Replace the online and target networks of a fresh `ts` with a saved checkpoint."""
+    path = Path(path)
+    run_dir, name = (path, "model.eqx") if path.is_dir() else (path.parent, path.name)
+    net, src = checkpoint.load(run_dir, name)
+    cfg = rb.cfg
+    # the value heads are only meaningful on the support they were trained with
+    same = ("net", "v_min", "v_max", "support_scale")
+    diff = [k for k in same if getattr(src, k) != getattr(cfg, k)]
+    if diff:
+        raise ValueError(f"checkpoint {run_dir / name} differs from the config in {diff}")
+    params, _ = eqx.partition(net, eqx.is_array)
+    log(f"warm start from {run_dir / name}")
+    return ts._replace(params=params, target_params=jax.tree.map(jnp.copy, params),
+                       opt_state=rb.optimizer.init(params))
+
+
+def train(cfg: Config, out: Path, log=print, time_limit_hours: float | None = None,
+          init_from: Path | None = None) -> dict:
     """Train until cfg.total_env_steps or, if given, until the next log window would
-    overrun `time_limit_hours`; either way the last window is evaluated and saved."""
+    overrun `time_limit_hours`; either way the last window is evaluated and saved.
+    `init_from` warm-starts the network (see `warm_start`)."""
     start = time.perf_counter()
     deadline = None if time_limit_hours is None else start + time_limit_hours * 3600
     out.mkdir(parents=True, exist_ok=True)
@@ -50,6 +79,8 @@ def train(cfg: Config, out: Path, log=print, time_limit_hours: float | None = No
     schedule = lr_schedule(cfg)
     key, eval_key = jax.random.split(jax.random.key(cfg.seed))
     ts = rb.init(key)
+    if init_from is not None:
+        ts = warm_start(rb, ts, init_from, log)
     log(f"devices={jax.devices()} params={num_params(rb.model(ts.params)):,} "
         f"replay={cfg.buffer_steps * cfg.num_envs:,} transitions "
         f"loop={'scan' if rb.uses_scan else 'python'} compute={cfg.compute_dtype}")
@@ -110,8 +141,8 @@ def train(cfg: Config, out: Path, log=print, time_limit_hours: float | None = No
 
 
 def main() -> None:
-    cfg, out, time_limit_hours = parse_args()
-    train(cfg, out, time_limit_hours=time_limit_hours)
+    cfg, out, time_limit_hours, init_from = parse_args()
+    train(cfg, out, time_limit_hours=time_limit_hours, init_from=init_from)
 
 
 if __name__ == "__main__":

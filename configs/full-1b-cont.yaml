@@ -1,0 +1,25 @@
+# Continue full-1b from its checkpoint with a higher replay ratio. Only the network is
+# checkpointed, so this is a warm start: fresh optimiser + replay, refilled for
+# `learning_starts` transitions by the loaded policy. Submit with
+# scripts/metacentrum/continue_blackwell.pbs (INIT_FROM=<run dir or .eqx>).
+extends: full-1b.yaml
+
+# Replay ratio 1024 * 2 / 256 = 8 (was 3.05; 8 is classic Rainbow's 32 / 4). An iteration
+# costs ~109 ms whatever the env count (measured at 512 and 672 envs: updates are ~97% of
+# it), so 256 envs -> ~2.35k env steps/s = ~400M steps in the 47.25 h budget. 380M keeps
+# a margin so the LR decay and PER beta annealing complete inside one job.
+num_envs: 256
+total_env_steps: 380000000
+buffer_steps: 131072        # 33.5M transitions (as before), ~3.6 GB on device
+
+# full-1b stopped at ~1.2e-4 on its schedule; resume a bit below that. Adam moments
+# start from zero, so warm up again, then decay to 1e-5.
+learning_rate: 1.0e-4
+lr_warmup_updates: 5000
+priority_beta0: 0.6         # the agent is no longer early in training
+
+iterations_per_log: 2500    # ~640k env steps per log line
+eval_every_logs: 10         # eval every ~6.4M env steps
+
+wandb:
+  tags: [rainbow, vit, 1b, continued]

@@ -7,7 +7,7 @@ from blockudoku import checkpoint
 from blockudoku.config import load_config
 from blockudoku.network import value_support
 from blockudoku.rainbow import categorical_projection, lr_schedule, make_rainbow, total_updates
-from blockudoku.train import train
+from blockudoku.train import train, warm_start
 
 
 def _uniform_c51_projection(p, returns, discount, support):
@@ -137,3 +137,29 @@ def test_time_limit_stops_early_with_final_eval(tmp_path):
     last = train(cfg, tmp_path, log=lambda *_: None, time_limit_hours=1e-9)
     assert last["env_steps"] == cfg.iterations_per_log * cfg.num_envs  # one window only
     assert "eval_score_mean" in last and (tmp_path / "best.eqx").exists()
+
+
+def test_warm_start_loads_online_and_target_nets(tmp_path):
+    cfg = load_config("smoke", ["total_env_steps=800", "eval_every_logs=1", "eval_episodes=4"])
+    train(cfg, tmp_path / "a", log=lambda *_: None)
+    rb = make_rainbow(cfg)
+    ts = rb.init(jax.random.key(1))
+    for path in (tmp_path / "a", tmp_path / "a" / "best.eqx"):
+        loaded = warm_start(rb, ts, path, log=lambda *_: None)
+        want, _ = checkpoint.load(path if path.is_dir() else path.parent,
+                                  "model.eqx" if path.is_dir() else path.name)
+        for net in (rb.model(loaded.params), rb.model(loaded.target_params)):
+            for a, b in zip(jax.tree.leaves(net), jax.tree.leaves(want)):
+                np.testing.assert_array_equal(a, b)
+    rb.run(loaded)  # donation-safe: online and target nets are distinct buffers
+    last = train(cfg, tmp_path / "b", log=lambda *_: None, init_from=tmp_path / "a")
+    assert "eval_score_mean" in last
+
+
+def test_warm_start_rejects_mismatched_net(tmp_path):
+    cfg = load_config("smoke", ["total_env_steps=800", "eval_every_logs=1", "eval_episodes=4"])
+    train(cfg, tmp_path, log=lambda *_: None)
+    other = load_config("smoke", ["v_max=123.0"])
+    rb = make_rainbow(other)
+    with pytest.raises(ValueError, match="v_max"):
+        warm_start(rb, rb.init(jax.random.key(0)), tmp_path, log=lambda *_: None)
