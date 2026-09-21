@@ -6,20 +6,37 @@ extends: full-1b.yaml
 
 # Replay ratio 1024 * 2 / 256 = 8 (was 3.05; 8 is classic Rainbow's 32 / 4). An iteration
 # costs ~109 ms whatever the env count (measured at 512 and 672 envs: updates are ~97% of
-# it), so 256 envs -> ~2.35k env steps/s = ~400M steps in the 47.25 h budget. 380M keeps
-# a margin so the LR decay and PER beta annealing complete inside one job.
+# it), so 256 envs -> ~2.35k env steps/s. Budget (47.25 h): 340M steps = ~40.2 h of
+# training + up to ~3.5 h of evals (below) + ~0.2 h fill/compile, leaving ~3 h of margin
+# for the predicted speed so the LR decay completes inside one job.
 num_envs: 256
-total_env_steps: 380000000
+total_env_steps: 340000000
 buffer_steps: 131072        # 33.5M transitions (as before), ~3.6 GB on device
 
-# full-1b stopped at ~1.2e-4 on its schedule; resume a bit below that. Adam moments
-# start from zero, so warm up again, then decay to 1e-5.
-learning_rate: 1.0e-4
+# full-1b-20260919-1904 ran its whole schedule and ended at lr 2e-5 / beta 1.0, and most
+# of its late gain (14k -> 25k train score over 600M-1B) came while the LR decayed. Resume
+# just above where it stopped (a higher LR would undo that), warm up again because Adam
+# moments start from zero, then keep annealing: 3e-5 -> 6e-6.
+learning_rate: 1.0e-5
 lr_warmup_updates: 5000
-priority_beta0: 0.6         # the agent is no longer early in training
+lr_final_fraction: 0.2
+priority_beta0: 1.0         # full-1b ended fully bias-corrected; stay there
+
+# Games now last ~1300 moves, so the inherited 2M transitions would hold only ~1.5k
+# episodes (~6 per env). Collecting is ~100x faster than training (no updates), so fill
+# ~30% of the buffer with the loaded policy first (~2 min) so that replay ratio 8 does not
+# overfit a tiny buffer.
+learning_starts: 10000000
 
 iterations_per_log: 2500    # ~640k env steps per log line
-eval_every_logs: 10         # eval every ~6.4M env steps
+eval_every_logs: 20         # eval every ~12.8M env steps -> ~27 evals
+
+# An eval runs until its longest game ends, ~4.2 ms per move for the 256 games (full-1b:
+# ~3000 s of evals + overhead over 149 evals). The best eval game there already took ~10.8k
+# moves (171k points), so the inherited 20k cap would soon truncate evals and under-report
+# the score. 100k moves costs ~7 min per eval in the worst case (~3.2 h over ~27 evals);
+# a realistic longest game of ~20k moves is ~1.5 min.
+eval_max_moves: 100000
 
 wandb:
   tags: [rainbow, vit, 1b, continued]
